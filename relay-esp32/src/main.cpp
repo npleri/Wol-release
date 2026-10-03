@@ -19,7 +19,7 @@ static const char* NTFY_HOST = "ntfy.sh";
 static const long MAX_SKEW_S = 90;                  // antigüedad máxima de una orden
 static const unsigned long STALL_MS = 120000;       // ntfy manda un keepalive cada ~45 s
 static const unsigned long RESTART_MS = 600000;     // sin conexión 10 min: reiniciar la placa
-static const int LED_PIN = 2;                       // LED azul de la DevKit: encendido = escuchando
+static const int LED_PIN = 2;                       // LED azul de la DevKit: apagado = todo bien; encendido = sin conexion
 
 static WiFiClientSecure client;
 static WiFiUDP udp;
@@ -108,6 +108,7 @@ static bool connectStream() {
 void setup() {
     Serial.begin(115200);
     pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH);                    // encendido hasta que quede escuchando
 
     if (sscanf(TARGET_MAC, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &targetMac[0], &targetMac[1], &targetMac[2],
                &targetMac[3], &targetMac[4], &targetMac[5]) != 6) {
@@ -142,7 +143,7 @@ void setup() {
 
 void loop() {
     bool listening = WiFi.status() == WL_CONNECTED && client.connected() && millis() - lastByteAt < STALL_MS;
-    digitalWrite(LED_PIN, listening);
+    digitalWrite(LED_PIN, !listening);
 
     if (!listening) {
         if (millis() - lastOkAt > RESTART_MS) ESP.restart();

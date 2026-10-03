@@ -152,7 +152,7 @@ El paquete mágico no viaja por Internet. El relé es una placa ESP32 que queda 
 6. En la app: **CONFIG → 07 · CLAVE DEL RELÉ**, cargá el valor de `RELAY_KEY` que está en `include\secrets.h`.
 7. Pasá la placa a un cargador USB, en un lugar con buena señal WiFi. **No la alimentes desde la PC que querés encender:** muchas placas madre cortan los USB al apagarse.
 
-**LED azul encendido** = el relé está conectado y escuchando. Con la PC apagada y el celular en datos móviles, tocá **ENCENDER**: debería decir "Orden enviada al relé" y la PC arrancar en unos segundos.
+**LED azul apagado** = el relé está conectado y escuchando. **Encendido** = está arrancando o no logra conectarse (WiFi o Internet). La luz roja de la placa solo indica que tiene corriente y no se puede apagar por programa. Con la PC apagada y el celular en datos móviles, tocá **ENCENDER**: debería decir "Orden enviada al relé" y la PC arrancar en unos segundos.
 
 `include\secrets.h` tiene la contraseña de tu WiFi y la clave del relé: no lo compartas ni lo subas a ningún repositorio (ya está excluido de git).
 
@@ -188,7 +188,7 @@ El token y la clave se guardan cifrados en el Android Keystore.
 | La app muestra ON pero dice "EL AGENTE NO RESPONDE" | El servicio `WolAgent` no está corriendo, o el firewall bloquea el puerto 47800 |
 | "TOKEN INVÁLIDO" | El token de la app no coincide: volvé a mirarlo con `Wol.Agent.exe token` |
 | Desde afuera figura OFF aunque la PC esté encendida | Tailscale apagado en el celular, o sin modo desatendido en la PC (paso 4) |
-| El relé no enciende la PC | LED azul apagado (sin WiFi o sin Internet), clave distinta en la app, o `TARGET_MAC` equivocada |
+| El relé no enciende la PC | LED azul encendido (sin WiFi o sin Internet), clave distinta en la app, o `TARGET_MAC` equivocada |
 | La hora `ACT.` de la app no avanza | La app dejó de consultar: cerrala y abrila, y reportalo |
 
 ---
