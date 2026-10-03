@@ -1,5 +1,6 @@
-# Compila y corre los tests en cada push. Al subir un tag vX.Y.Z, además firma
-# el APK de release y lo publica en GitHub Releases.
+# Compila la app (con tests) y el agente de Windows en cada push. Al subir un
+# tag vX.Y.Z, además firma el APK y publica en GitHub Releases el APK y el
+# agente ya compilado (zip autocontenido: no requiere .NET en la PC).
 name: Build
 
 on:
@@ -24,8 +25,22 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
       - name: Tests y APK debug
         run: bash gradlew testDebugUnitTest assembleDebug
+
+      - name: Compilar el agente de Windows
+        run: |
+          version="0.0.0"
+          [[ "$GITHUB_REF" == refs/tags/v* ]] && version="${GITHUB_REF_NAME#v}"
+          dotnet publish agent-windows/Wol.Agent -c Release -r win-x64 --self-contained true \
+            -p:EnableWindowsTargeting=true -p:EnableCompressionInSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -p:Version="$version" \
+            -o agent-dist/bin
+          cp agent-windows/install.ps1 agent-windows/smoke-test.ps1 agent-dist/
 
       - name: Firmar y publicar el release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -46,4 +61,8 @@ jobs:
           apk="wol-$GITHUB_REF_NAME.apk"
           cp app/build/outputs/apk/release/app-release.apk "$apk"
           sha256sum "$apk" > "$apk.sha256"
-          gh release create "$GITHUB_REF_NAME" "$apk" "$apk.sha256" --title "WoL $GITHUB_REF_NAME" --generate-notes
+          agent="wol-agent-$GITHUB_REF_NAME.zip"
+          (cd agent-dist && zip -qr "../$agent" .)
+          sha256sum "$agent" > "$agent.sha256"
+          gh release create "$GITHUB_REF_NAME" "$apk" "$apk.sha256" "$agent" "$agent.sha256" \
+            --title "WoL $GITHUB_REF_NAME" --generate-notes

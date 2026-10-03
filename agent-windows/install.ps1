@@ -4,11 +4,15 @@
     Instala el agente WoL como servicio de Windows (o lo desinstala con -Uninstall).
 
 .DESCRIPTION
-    Compila el agente en %ProgramFiles%\WolAgent, crea el servicio "WolAgent"
+    Instala el agente en %ProgramFiles%\WolAgent, crea el servicio "WolAgent"
     (LocalSystem, inicio automatico, se reinicia si falla) y una regla de
     firewall para el puerto 47800 limitada a la red local y a Tailscale
     (100.64.0.0/10). Al final muestra el token para cargarlo en la app.
-    Requiere el SDK de .NET 10. Volver a ejecutarlo actualiza el agente.
+    Volver a ejecutarlo actualiza el agente.
+
+    Si al lado del script hay una carpeta bin\ con Wol.Agent.exe (el zip de
+    Releases), instala ese ejecutable y no hace falta tener .NET. Si no, lo
+    compila desde el codigo, y para eso requiere el SDK de .NET 10.
 
 .EXAMPLE
     .\agent-windows\install.ps1
@@ -35,8 +39,16 @@ if ($Uninstall) {
     return
 }
 
-dotnet publish (Join-Path $PSScriptRoot "Wol.Agent") -c Release -o $dir
-if ($LASTEXITCODE -ne 0) { throw "Fallo la compilacion del agente" }
+$prebuilt = Join-Path $PSScriptRoot "bin"
+if (Test-Path (Join-Path $prebuilt "Wol.Agent.exe")) {
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    Copy-Item (Join-Path $prebuilt "*") $dir -Recurse -Force
+    Get-ChildItem $dir -Recurse | Unblock-File      # quita la marca de "descargado de Internet"
+}
+else {
+    dotnet publish (Join-Path $PSScriptRoot "Wol.Agent") -c Release -o $dir
+    if ($LASTEXITCODE -ne 0) { throw "Fallo la compilacion del agente" }
+}
 
 New-Service -Name $name -BinaryPathName "`"$exe`"" -DisplayName "WoL Agent" `
     -Description "Agente para controlar la PC desde la app WoL (puerto $port)" -StartupType Automatic | Out-Null

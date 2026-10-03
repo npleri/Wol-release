@@ -15,9 +15,13 @@ Control remoto de una PC con Windows desde Android: **encenderla con Wake on LAN
 
 Solo la app es imprescindible: con ella y la PC bien configurada ya se puede encender desde la red de casa. El agente, Tailscale y el relé suman funciones (ver la guía).
 
-## Instalar la app
+## Descargas
 
-Descargar `wol-vX.Y.Z.apk` desde [Releases](../../releases) e instalarlo (Android 8.0 o superior; hay que permitir la instalación desde orígenes desconocidos). Cada release incluye el `.sha256` para verificar el archivo.
+En [Releases](../../releases), cada versión trae:
+
+- `wol-vX.Y.Z.apk`: la app (Android 8.0 o superior; hay que permitir la instalación desde orígenes desconocidos).
+- `wol-agent-vX.Y.Z.zip`: el agente de Windows ya compilado, con su instalador. No requiere .NET.
+- Un `.sha256` por archivo, para verificar la descarga.
 
 ## Cómo funciona
 

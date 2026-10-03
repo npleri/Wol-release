@@ -13,7 +13,7 @@ Cómo dejar todo funcionando en tu propia red. Los valores de ejemplo (`192.168.
 
 Cada paso se apoya en los anteriores, pero podés quedarte en el que te alcance.
 
-**Requisitos generales:** PC con Windows 10/11 conectada **por cable Ethernet** al router, y un celular con Android 8.0 o superior. Para los pasos 3 y 5, descargá este repositorio (botón **Code → Download ZIP**, o `git clone`).
+**Requisitos generales:** PC con Windows 10/11 conectada **por cable Ethernet** al router, y un celular con Android 8.0 o superior. Para los scripts de diagnóstico (paso 1) y el relé (paso 5), descargá este repositorio (botón **Code → Download ZIP**, o `git clone`).
 
 ---
 
@@ -76,17 +76,20 @@ Para probar el WoL sin la app, desde otra PC de la red: `.\tools\enviar-paquete-
 
 El agente es un servicio de Windows que escucha en el puerto **47800** y acepta solo pedidos con un token. Su regla de firewall admite únicamente tu red local y Tailscale.
 
-1. Instalá el SDK de .NET 10 (PowerShell como administrador):
-   ```powershell
-   winget install Microsoft.DotNet.SDK.10
-   ```
-2. Abrí una terminal **nueva** como administrador, en la carpeta del repositorio:
+1. Descargá `wol-agent-vX.Y.Z.zip` desde [Releases](../../releases) y descomprimilo. Trae el agente ya compilado: no hace falta instalar .NET.
+2. Abrí PowerShell **como administrador** en la carpeta descomprimida:
    ```powershell
    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-   .\agent-windows\install.ps1
+   .\install.ps1
    ```
-   Compila el agente, lo instala como servicio con inicio automático, crea la regla de firewall y al final muestra el **token**.
+   Lo instala como servicio con inicio automático, crea la regla de firewall y al final muestra el **token**.
 3. En la app: **CONFIG → 06 · TOKEN DEL AGENTE**, pegá el token y guardá.
+
+<details>
+<summary>Alternativa: compilarlo desde el código</summary>
+
+Instalá el SDK de .NET 10 (`winget install Microsoft.DotNet.SDK.10`), abrí una terminal **nueva** como administrador en la carpeta del repositorio y corré `.\agent-windows\install.ps1`. En ese caso los scripts de la tabla de abajo están en `agent-windows\`.
+</details>
 
 Con la PC encendida la app muestra `AGENTE OK` y los botones **APAGAR / REINICIAR / SUSPENDER / HIBERNAR**. Cada botón se confirma con un segundo toque.
 
@@ -95,9 +98,9 @@ Comandos útiles (como administrador):
 | Para | Comando |
 |---|---|
 | Volver a ver el token | `& "$env:ProgramFiles\WolAgent\Wol.Agent.exe" token` |
-| Probar el agente (no apaga nada) | `.\agent-windows\smoke-test.ps1` |
-| Actualizar el agente | volver a correr `.\agent-windows\install.ps1` |
-| Desinstalarlo | `.\agent-windows\install.ps1 -Uninstall` |
+| Probar el agente (no apaga nada) | `.\smoke-test.ps1` |
+| Actualizar el agente | bajar el zip nuevo y volver a correr `.\install.ps1` |
+| Desinstalarlo | `.\install.ps1 -Uninstall` |
 
 ---
 
