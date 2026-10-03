@@ -17,6 +17,12 @@ fun magicPacket(mac: ByteArray): ByteArray {
     return ByteArray(6) { 0xFF.toByte() } + ByteArray(16 * 6) { mac[it % 6] }
 }
 
+/** Token del agente: 32 caracteres hex; se aceptan guiones, espacios y mayúsculas. Devuelve null si es inválido. */
+fun normalizeToken(text: String): String? {
+    val hex = text.filter { !it.isWhitespace() && it != '-' }.lowercase()
+    return hex.takeIf { it.isEmpty() || (it.length == 32 && it.all { c -> c.digitToIntOrNull(16) != null }) }
+}
+
 /** Dirección de broadcast IPv4 de la subred: ip OR máscara invertida. */
 fun broadcastOf(ip: ByteArray, prefix: Int): ByteArray {
     val hostBits = if (prefix >= 32) 0 else -1 ushr prefix

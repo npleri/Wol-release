@@ -28,6 +28,17 @@ class WolTest {
     }
 
     @Test
+    fun normalizeToken() {
+        val plain = "0123456789abcdef0123456789abcdef"
+        assertEquals(plain, normalizeToken(plain))
+        assertEquals(plain, normalizeToken("0123-4567-89AB-CDEF-0123-4567-89ab-cdef"))
+        assertEquals(plain, normalizeToken(" 0123 4567 89ab cdef 0123 4567 89ab cdef "))
+        assertEquals("", normalizeToken(""))
+        assertNull(normalizeToken("0123"))
+        assertNull(normalizeToken("0123456789abcdef0123456789abcdeg"))
+    }
+
+    @Test
     fun broadcastOf() {
         fun bc(ip: String, prefix: Int) = broadcastOf(ip.split(".").map { it.toInt().toByte() }.toByteArray(), prefix)
             .joinToString(".") { (it.toInt() and 0xFF).toString() }

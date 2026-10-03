@@ -51,6 +51,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -101,6 +102,19 @@ private fun App() {
     }
 }
 
+private val ACTIONS = listOf(
+    "shutdown" to "APAGAR",
+    "restart" to "REINICIAR",
+    "sleep" to "SUSPENDER",
+    "hibernate" to "HIBERNAR",
+)
+private val ACTION_DONE = mapOf(
+    "shutdown" to "Apagando…",
+    "restart" to "Reiniciando…",
+    "sleep" to "Suspendiendo…",
+    "hibernate" to "Hibernando…",
+)
+
 @Composable
 private fun HomeScreen(pc: Pc, onEdit: () -> Unit) {
     val context = LocalContext.current
@@ -108,16 +122,17 @@ private fun HomeScreen(pc: Pc, onEdit: () -> Unit) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var online by remember { mutableStateOf<Boolean?>(null) }
+    var probe by remember { mutableStateOf<Probe?>(null) }
     var wakeAt by remember { mutableLongStateOf(0L) }
     var message by remember { mutableStateOf("") }
 
-    LaunchedEffect(pc.host) {
-        online = null
+    LaunchedEffect(pc) {
+        probe = null
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                online = isOnline(pc.host)
-                if (wakeAt > 0 && online == true) {
+                val current = probe(pc)
+                probe = current
+                if (wakeAt > 0 && current.online) {
                     wakeAt = 0
                     message = ""
                 } else if (wakeAt > 0 && SystemClock.elapsedRealtime() - wakeAt > WAKE_TIMEOUT_MS) {
@@ -130,12 +145,24 @@ private fun HomeScreen(pc: Pc, onEdit: () -> Unit) {
     }
 
     val waking = wakeAt > 0
+    val online = probe?.online
+    val agent = probe?.agent
     val status = when {
         waking -> "BOOT"
         online == true -> "ON"
         online == false -> "OFF"
         else -> "--"
     }
+    val info = when {
+        waking || online != true -> null
+        agent != null -> "AGENTE OK · ${agent.hostname} · ${agent.user ?: "SIN SESIÓN"}"
+        probe?.unauthorized == true -> "TOKEN INVÁLIDO: REVISALO EN CONFIG"
+        pc.token.isNotEmpty() -> "EL AGENTE NO RESPONDE"
+        else -> "SIN AGENTE CONFIGURADO"
+    }
+    val warning = if (agent?.warnings?.contains("FAST_STARTUP_ENABLED") == true) {
+        "INICIO RÁPIDO ACTIVO EN LA PC: EL WOL DESDE APAGADO PUEDE FALLAR"
+    } else null
 
     Column(Modifier.fillMaxSize()) {
         Header("WOL · ${BuildConfig.VERSION_NAME}", "CONFIG", onEdit)
@@ -156,20 +183,74 @@ private fun HomeScreen(pc: Pc, onEdit: () -> Unit) {
             style = TextStyle(fontFamily = Doto, fontSize = 96.sp, letterSpacing = (-0.02).em, color = c.ink),
         )
         DotRow(waking = waking, on = online == true && !waking)
+        listOfNotNull(info, warning).forEach {
+            BasicText(it, Modifier.padding(top = 12.dp), style = labelStyle(c.ink2))
+        }
         Spacer(Modifier.weight(1f))
 
         if (message.isNotEmpty()) {
             BasicText(message.uppercase(), Modifier.padding(bottom = 16.dp), style = labelStyle(c.ink2))
         }
-        PillButton("ENCENDER", enabled = online != true && !waking, accent = true) {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            scope.launch {
-                message = try {
-                    val targets = sendWake(context, parseMac(pc.mac)!!, pc.port)
-                    wakeAt = SystemClock.elapsedRealtime()
-                    "Paquete enviado 3× → " + targets.joinToString { it.hostAddress.orEmpty() }
-                } catch (e: IOException) {
-                    "Error al enviar: ${e.message}"
+        if (agent != null && !waking) {
+            PowerGrid { action ->
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                scope.launch {
+                    message = try {
+                        power(pc, action)
+                        ACTION_DONE.getValue(action)
+                    } catch (e: IOException) {
+                        "Error: ${e.message}"
+                    }
+                }
+            }
+        } else {
+            PillButton("ENCENDER", enabled = online != true && !waking, accent = true) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                scope.launch {
+                    message = try {
+                        val targets = sendWake(context, parseMac(pc.mac)!!, pc.port)
+                        wakeAt = SystemClock.elapsedRealtime()
+                        "Paquete enviado 3× → " + targets.joinToString { it.hostAddress.orEmpty() }
+                    } catch (e: IOException) {
+                        "Error al enviar: ${e.message}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Botones de energía con confirmación en dos toques: el primero arma la acción (rojo), el segundo la ejecuta. */
+@Composable
+private fun PowerGrid(onAction: (String) -> Unit) {
+    var armed by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(armed) {
+        if (armed != null) {
+            delay(3000)
+            armed = null
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ACTIONS.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { (action, label) ->
+                    val isArmed = armed == action
+                    Box(Modifier.weight(1f)) {
+                        PillButton(
+                            if (isArmed) "¿$label?" else label,
+                            enabled = true,
+                            accent = isArmed,
+                            outlined = !isArmed,
+                            height = 56.dp,
+                        ) {
+                            if (isArmed) {
+                                armed = null
+                                onAction(action)
+                            } else {
+                                armed = action
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -183,11 +264,13 @@ private fun SettingsScreen(pc: Pc, canCancel: Boolean, onSave: (Pc) -> Unit, onC
     var mac by rememberSaveable { mutableStateOf(pc.mac) }
     var host by rememberSaveable { mutableStateOf(pc.host) }
     var port by rememberSaveable { mutableStateOf(pc.port.toString()) }
+    var token by rememberSaveable { mutableStateOf(pc.token) }
     BackHandler(enabled = canCancel, onBack = onCancel)
 
     val macBytes = parseMac(mac)
     val portNumber = port.toIntOrNull()?.takeIf { it in 1..65535 }
-    val valid = macBytes != null && host.isNotBlank() && portNumber != null
+    val tokenValue = normalizeToken(token)
+    val valid = macBytes != null && host.isNotBlank() && portNumber != null && tokenValue != null
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Header("WOL · CONFIG", if (canCancel) "CERRAR" else null, onCancel)
@@ -208,14 +291,20 @@ private fun SettingsScreen(pc: Pc, canCancel: Boolean, onSave: (Pc) -> Unit, onC
             error = port.isNotBlank() && portNumber == null,
             keyboard = KeyboardOptions(keyboardType = KeyboardType.Number),
         )
+        Field(
+            "05 · TOKEN DEL AGENTE (OPCIONAL)", token, { token = it }, hint = "xxxx-xxxx-xxxx-…",
+            error = tokenValue == null,
+            keyboard = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
+        )
         BasicText(
-            "La MAC y la IP las muestra tools/diagnostico-wol.ps1 en la PC.".uppercase(),
+            ("La MAC y la IP las muestra tools/diagnostico-wol.ps1. El token lo muestra la PC al instalar el agente. " +
+                "Con Tailscale, usá la IP 100.x de la PC para controlarla también desde afuera.").uppercase(),
             Modifier.padding(top = 24.dp),
             style = labelStyle(c.ink2),
         )
         Spacer(Modifier.height(40.dp))
         PillButton("GUARDAR", enabled = valid, accent = false) {
-            onSave(Pc(name.trim().ifBlank { "PC" }, formatMac(macBytes!!), host.trim(), portNumber!!))
+            onSave(Pc(name.trim().ifBlank { "PC" }, formatMac(macBytes!!), host.trim(), portNumber!!, tokenValue!!))
         }
     }
 }
@@ -300,28 +389,32 @@ private fun Field(
 
 /** Botón píldora; al presionarlo se invierte (sin sombras ni ripple). */
 @Composable
-private fun PillButton(text: String, enabled: Boolean, accent: Boolean, onClick: () -> Unit) {
+private fun PillButton(
+    text: String,
+    enabled: Boolean,
+    accent: Boolean,
+    outlined: Boolean = false,
+    height: Dp = 64.dp,
+    onClick: () -> Unit,
+) {
     val c = LocalPalette.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val fill = when {
-        !enabled -> c.ink3
-        accent -> c.red
-        else -> c.ink
-    }
-    val textColor = when {
-        pressed -> c.ink
-        !enabled -> c.ink2
-        accent -> Color.White
-        else -> c.bg
+    val (fill, border, textColor) = when {
+        !enabled -> Triple(c.ink3, c.ink3, c.ink2)
+        pressed && outlined -> Triple(c.ink, c.ink, c.bg)
+        pressed -> Triple(c.bg, c.ink, c.ink)
+        accent -> Triple(c.red, c.red, Color.White)
+        outlined -> Triple(Color.Transparent, c.ink, c.ink)
+        else -> Triple(c.ink, c.ink, c.bg)
     }
     Box(
         Modifier
             .fillMaxWidth()
-            .height(64.dp)
+            .height(height)
             .clip(CircleShape)
-            .background(if (pressed) c.bg else fill)
-            .border(1.dp, if (pressed) c.ink else fill, CircleShape)
+            .background(fill)
+            .border(1.dp, border, CircleShape)
             .clickable(source, indication = null, enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

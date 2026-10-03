@@ -15,6 +15,9 @@ import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.URL
+import java.net.HttpURLConnection
+import org.json.JSONObject
 
 /** Envía el paquete mágico 3 veces al broadcast de la red actual y a 255.255.255.255. Devuelve los destinos que funcionaron. */
 suspend fun sendWake(context: Context, mac: ByteArray, port: Int): List<InetAddress> = withContext(Dispatchers.IO) {
@@ -47,8 +50,60 @@ private fun subnetBroadcast(context: Context): InetAddress? {
     return InetAddress.getByAddress(broadcastOf(link.address.address, link.prefixLength))
 }
 
-// ponytail: estado por sondeo TCP a puertos típicos de Windows y Sunshine; reemplazar por GET /api/v1/status cuando exista el agente.
-private val PROBE_PORTS = listOf(445, 135, 139, 3389, 47989, 47800)
+const val AGENT_PORT = 47800
+
+class AgentException(val code: Int) : IOException("HTTP $code")
+
+data class Agent(val hostname: String, val user: String?, val warnings: List<String>)
+
+/** online: la PC responde; agent: datos del agente si respondió con el token; unauthorized: token rechazado. */
+data class Probe(val online: Boolean, val agent: Agent? = null, val unauthorized: Boolean = false)
+
+/** Primero pregunta al agente (si hay token); si no contesta, cae al sondeo TCP. */
+suspend fun probe(pc: Pc): Probe = withContext(Dispatchers.IO) {
+    if (pc.token.isNotEmpty()) {
+        try {
+            val status = agentCall(pc, "GET", "status")
+            val warnings = status.optJSONArray("warnings")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty()
+            val user = status.optString("loggedInUser").takeIf { it.isNotEmpty() && it != "null" }
+            return@withContext Probe(true, Agent(status.optString("hostname"), user, warnings))
+        } catch (e: AgentException) {
+            if (e.code == 401) return@withContext Probe(true, unauthorized = true)
+        } catch (e: IOException) {
+            // Agente apagado o inalcanzable: seguimos con el sondeo TCP.
+        }
+    }
+    Probe(isOnline(pc.host))
+}
+
+/** Acciones de la lista blanca del agente: shutdown, restart, sleep, hibernate, cancel. */
+suspend fun power(pc: Pc, action: String) {
+    withContext(Dispatchers.IO) { agentCall(pc, "POST", "power/$action") }
+}
+
+// ponytail: HTTP sin TLS; el token viaja en claro dentro de la LAN (por Tailscale va cifrado). HTTPS con certificado fijado llega con el QR (Fase 3).
+private fun agentCall(pc: Pc, method: String, path: String): JSONObject {
+    val conn = URL("http://${pc.host}:$AGENT_PORT/api/v1/$path").openConnection() as HttpURLConnection
+    try {
+        conn.requestMethod = method
+        conn.connectTimeout = 1500
+        conn.readTimeout = 3000
+        conn.setRequestProperty("Authorization", "Bearer ${pc.token}")
+        if (method == "POST") {
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.outputStream.use { it.write("{}".toByteArray()) }
+        }
+        if (conn.responseCode !in 200..299) throw AgentException(conn.responseCode)
+        val body = conn.inputStream.bufferedReader().use { it.readText() }
+        return runCatching { JSONObject(body) }.getOrDefault(JSONObject())
+    } finally {
+        conn.disconnect()
+    }
+}
+
+// Sondeo TCP para saber si la PC está encendida aunque no tenga el agente.
+private val PROBE_PORTS = listOf(445, 135, 139, 3389, 47989, AGENT_PORT)
 
 suspend fun isOnline(host: String): Boolean = withContext(Dispatchers.IO) {
     val address = try {
