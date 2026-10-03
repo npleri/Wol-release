@@ -1,0 +1,49 @@
+# Compila y corre los tests en cada push. Al subir un tag vX.Y.Z, además firma
+# el APK de release y lo publica en GitHub Releases.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Tests y APK debug
+        run: bash gradlew testDebugUnitTest assembleDebug
+
+      - name: Firmar y publicar el release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -q "versionName = \"$version\"" app/build.gradle.kts \
+            || { echo "::error::El tag $GITHUB_REF_NAME no coincide con versionName en app/build.gradle.kts"; exit 1; }
+          [ -n "$KEYSTORE_BASE64" ] || { echo "::error::Faltan los secretos del keystore"; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          export KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          bash gradlew assembleRelease
+          apk="wol-$GITHUB_REF_NAME.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          gh release create "$GITHUB_REF_NAME" "$apk" "$apk.sha256" --title "WoL $GITHUB_REF_NAME" --generate-notes
