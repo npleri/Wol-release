@@ -39,6 +39,16 @@ class WolTest {
     }
 
     @Test
+    fun relayProtocol() {
+        val key = "00112233445566778899aabbccddeeff"
+        assertEquals("wol-6220d558b55b46d3321f1909b9d1e78c", relayTopic(key))
+        assertEquals(
+            "wake.1700000000.f1faaf00951d473a7e23cd03f82060f0adbe5e9e5642dae90972aee051ee106f",
+            relayMessage(key, 1700000000),
+        )
+    }
+
+    @Test
     fun broadcastOf() {
         fun bc(ip: String, prefix: Int) = broadcastOf(ip.split(".").map { it.toInt().toByte() }.toByteArray(), prefix)
             .joinToString(".") { (it.toInt() and 0xFF).toString() }

@@ -1,23 +1,31 @@
 # WoL
 
-App Android para **encender una PC con Wake on LAN**, ver si está prendida y, con el agente de Windows instalado, **apagarla, reiniciarla, suspenderla o hibernarla**. Estilo visual monocromo con tipografía de matriz de puntos.
+Control remoto de una PC con Windows desde Android: **encenderla con Wake on LAN**, ver si está prendida y **apagarla, reiniciarla, suspenderla o hibernarla**, en casa o desde afuera. Estilo visual monocromo con tipografía de matriz de puntos.
 
-## Instalar
+**Para configurarlo en tu red, seguí la [Guía de instalación](GUIA.md).**
+
+## Qué hay en este repositorio
+
+| Carpeta | Qué es | Para qué sirve |
+|---|---|---|
+| raíz (`app/`, Gradle) | App Android (Kotlin + Jetpack Compose) | Encender la PC y controlarla |
+| `agent-windows/` | Agente: servicio de Windows (.NET 10) | Informar el estado y ejecutar las acciones de energía |
+| `relay-esp32/` | Firmware para ESP32 (PlatformIO) | Encender la PC cuando estás fuera de casa |
+| `tools/` | Scripts de PowerShell | Diagnosticar y probar el Wake on LAN |
+
+Solo la app es imprescindible: con ella y la PC bien configurada ya se puede encender desde la red de casa. El agente, Tailscale y el relé suman funciones (ver la guía).
+
+## Instalar la app
 
 Descargar `wol-vX.Y.Z.apk` desde [Releases](../../releases) e instalarlo (Android 8.0 o superior; hay que permitir la instalación desde orígenes desconocidos). Cada release incluye el `.sha256` para verificar el archivo.
 
-## Uso
+## Cómo funciona
 
-1. En la PC: activar Wake on LAN en la BIOS y en la placa de red, y desactivar el Inicio rápido de Windows.
-2. En la app: cargar el nombre, la **MAC** de la placa Ethernet, la **IP** de la PC y el puerto (9 por defecto).
-3. Con el celular en la **misma red WiFi** que la PC, tocar **ENCENDER**.
-4. (Opcional) Con el agente WoL instalado en la PC, cargar su **token** en la configuración: aparecen los botones Apagar, Reiniciar, Suspender e Hibernar (se confirman con un segundo toque). El agente escucha en el puerto 47800 y el token se guarda cifrado en el Android Keystore.
+- **Encender en casa:** la app manda el paquete mágico por broadcast a la red WiFi.
+- **Encender desde afuera:** el paquete mágico no cruza Internet. La app publica una orden firmada (HMAC-SHA256) en ntfy.sh; el relé ESP32, que está en la red de la casa, la recibe y manda el paquete mágico.
+- **Estado y energía:** la app habla con el agente (puerto 47800, autenticado con token) por la red local o por Tailscale. Sin agente, estima el estado probando puertos habituales de Windows.
 
-Sin agente, el estado (ON / OFF) se obtiene probando si la PC responde en puertos habituales de Windows (445, 135, 139, 3389). Si el firewall los bloquea, la PC puede figurar como OFF aunque esté encendida.
-
-**Limitación:** el paquete mágico no cruza Internet. Para encender desde afuera hace falta un equipo siempre encendido en la red de la casa (router con WoL, ESP32, Raspberry Pi).
-
-## Compilar
+## Compilar la app
 
 Requiere JDK 17+ y el SDK de Android (API 36).
 

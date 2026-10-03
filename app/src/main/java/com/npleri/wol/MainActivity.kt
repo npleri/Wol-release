@@ -61,8 +61,12 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 private const val WAKE_TIMEOUT_MS = 120_000L
+private const val FAST_POLL_MS = 90_000L
+private val CLOCK = DateTimeFormatter.ofPattern("HH:mm:ss")
 private const val DOTS = 16
 
 class MainActivity : ComponentActivity() {
@@ -122,31 +126,35 @@ private fun HomeScreen(pc: Pc, onEdit: () -> Unit) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var probe by remember { mutableStateOf<Probe?>(null) }
+    var last by remember { mutableStateOf<Probe?>(null) }
+    var checkedAt by remember { mutableStateOf("") }
     var wakeAt by remember { mutableLongStateOf(0L) }
+    var fastUntil by remember { mutableLongStateOf(0L) }    // sondeo rápido después de pedir una acción
     var message by remember { mutableStateOf("") }
 
     LaunchedEffect(pc) {
-        probe = null
+        last = null
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 val current = probe(pc)
-                probe = current
+                // Si el estado cambió, el aviso de la acción anterior ("Apagando…") ya no aplica.
+                if (last != null && last?.online != current.online) message = ""
+                last = current
+                checkedAt = LocalTime.now().format(CLOCK)
                 if (wakeAt > 0 && current.online) {
                     wakeAt = 0
-                    message = ""
                 } else if (wakeAt > 0 && SystemClock.elapsedRealtime() - wakeAt > WAKE_TIMEOUT_MS) {
                     wakeAt = 0
                     message = "Sin respuesta tras 2 min. Revisá BIOS e Inicio rápido (Fase 0)."
                 }
-                delay(if (wakeAt > 0) 1500 else 4000)
+                delay(if (SystemClock.elapsedRealtime() < fastUntil) 1500 else 4000)
             }
         }
     }
 
     val waking = wakeAt > 0
-    val online = probe?.online
-    val agent = probe?.agent
+    val online = last?.online
+    val agent = last?.agent
     val status = when {
         waking -> "BOOT"
         online == true -> "ON"
@@ -156,7 +164,7 @@ private fun HomeScreen(pc: Pc, onEdit: () -> Unit) {
     val info = when {
         waking || online != true -> null
         agent != null -> "AGENTE OK · ${agent.hostname} · ${agent.user ?: "SIN SESIÓN"}"
-        probe?.unauthorized == true -> "TOKEN INVÁLIDO: REVISALO EN CONFIG"
+        last?.unauthorized == true -> "TOKEN INVÁLIDO: REVISALO EN CONFIG"
         pc.token.isNotEmpty() -> "EL AGENTE NO RESPONDE"
         else -> "SIN AGENTE CONFIGURADO"
     }
@@ -172,11 +180,14 @@ private fun HomeScreen(pc: Pc, onEdit: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         Hairline()
         Spec("MAC", pc.mac)
-        Spec("HOST", pc.host)
+        Spec("HOST", pc.hosts.joinToString(" · "))
         Spec("PUERTO", pc.port.toString())
 
         Spacer(Modifier.weight(1f))
-        BasicText("02 · ESTADO", style = labelStyle(c.ink2))
+        Row(Modifier.fillMaxWidth()) {
+            BasicText("02 · ESTADO", Modifier.weight(1f), style = labelStyle(c.ink2))
+            if (checkedAt.isNotEmpty()) BasicText("ACT. $checkedAt", style = labelStyle(c.ink2))
+        }
         BasicText(
             status,
             maxLines = 1,
@@ -194,9 +205,11 @@ private fun HomeScreen(pc: Pc, onEdit: () -> Unit) {
         if (agent != null && !waking) {
             PowerGrid { action ->
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                val host = last?.host.orEmpty()     // la dirección por la que respondió el agente
                 scope.launch {
                     message = try {
-                        power(pc, action)
+                        power(host, pc.token, action)
+                        fastUntil = SystemClock.elapsedRealtime() + FAST_POLL_MS
                         ACTION_DONE.getValue(action)
                     } catch (e: IOException) {
                         "Error: ${e.message}"
@@ -207,13 +220,30 @@ private fun HomeScreen(pc: Pc, onEdit: () -> Unit) {
             PillButton("ENCENDER", enabled = online != true && !waking, accent = true) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 scope.launch {
-                    message = try {
+                    // En casa alcanza con el broadcast; afuera lo hace el relé. Se intentan los dos.
+                    val results = mutableListOf<String>()
+                    var sent = false
+                    try {
                         val targets = sendWake(context, parseMac(pc.mac)!!, pc.port)
-                        wakeAt = SystemClock.elapsedRealtime()
-                        "Paquete enviado 3× → " + targets.joinToString { it.hostAddress.orEmpty() }
+                        results += "Paquete enviado 3× → " + targets.joinToString { it.hostAddress.orEmpty() }
+                        sent = true
                     } catch (e: IOException) {
-                        "Error al enviar: ${e.message}"
+                        results += "Red local: ${e.message}"
                     }
+                    if (pc.relayKey.isNotEmpty()) {
+                        try {
+                            sendRelayWake(pc.relayKey)
+                            results += "Orden enviada al relé"
+                            sent = true
+                        } catch (e: IOException) {
+                            results += "Relé: ${e.message}"
+                        }
+                    }
+                    if (sent) {
+                        wakeAt = SystemClock.elapsedRealtime()
+                        fastUntil = wakeAt + WAKE_TIMEOUT_MS
+                    }
+                    message = results.joinToString(" · ")
                 }
             }
         }
@@ -263,14 +293,17 @@ private fun SettingsScreen(pc: Pc, canCancel: Boolean, onSave: (Pc) -> Unit, onC
     var name by rememberSaveable { mutableStateOf(pc.name) }
     var mac by rememberSaveable { mutableStateOf(pc.mac) }
     var host by rememberSaveable { mutableStateOf(pc.host) }
+    var remoteHost by rememberSaveable { mutableStateOf(pc.remoteHost) }
     var port by rememberSaveable { mutableStateOf(pc.port.toString()) }
     var token by rememberSaveable { mutableStateOf(pc.token) }
+    var relayKey by rememberSaveable { mutableStateOf(pc.relayKey) }
     BackHandler(enabled = canCancel, onBack = onCancel)
 
     val macBytes = parseMac(mac)
     val portNumber = port.toIntOrNull()?.takeIf { it in 1..65535 }
     val tokenValue = normalizeToken(token)
-    val valid = macBytes != null && host.isNotBlank() && portNumber != null && tokenValue != null
+    val relayValue = normalizeToken(relayKey)
+    val valid = macBytes != null && host.isNotBlank() && portNumber != null && tokenValue != null && relayValue != null
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Header("WOL · CONFIG", if (canCancel) "CERRAR" else null, onCancel)
@@ -283,28 +316,38 @@ private fun SettingsScreen(pc: Pc, canCancel: Boolean, onSave: (Pc) -> Unit, onC
             keyboard = KeyboardOptions(KeyboardCapitalization.Characters, autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
         )
         Field(
-            "03 · IP O HOST", host, { host = it }, hint = "192.168.1.10",
+            "03 · IP EN CASA", host, { host = it }, hint = "192.168.1.10",
             keyboard = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Uri),
         )
         Field(
-            "04 · PUERTO WOL", port, { port = it }, hint = "9",
+            "04 · IP DE TAILSCALE (OPCIONAL)", remoteHost, { remoteHost = it }, hint = "100.x.x.x",
+            keyboard = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Uri),
+        )
+        Field(
+            "05 · PUERTO WOL", port, { port = it }, hint = "9",
             error = port.isNotBlank() && portNumber == null,
             keyboard = KeyboardOptions(keyboardType = KeyboardType.Number),
         )
         Field(
-            "05 · TOKEN DEL AGENTE (OPCIONAL)", token, { token = it }, hint = "xxxx-xxxx-xxxx-…",
+            "06 · TOKEN DEL AGENTE (OPCIONAL)", token, { token = it }, hint = "xxxx-xxxx-xxxx-…",
             error = tokenValue == null,
+            keyboard = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
+        )
+        Field(
+            "07 · CLAVE DEL RELÉ (OPCIONAL)", relayKey, { relayKey = it }, hint = "32 caracteres hex",
+            error = relayValue == null,
             keyboard = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
         )
         BasicText(
             ("La MAC y la IP las muestra tools/diagnostico-wol.ps1. El token lo muestra la PC al instalar el agente. " +
-                "Con Tailscale, usá la IP 100.x de la PC para controlarla también desde afuera.").uppercase(),
+                "La IP de Tailscale (100.x) sirve para ver el estado y apagarla estando fuera de casa. " +
+                "La clave del relé (ESP32) permite encender la PC estando fuera de casa.").uppercase(),
             Modifier.padding(top = 24.dp),
             style = labelStyle(c.ink2),
         )
         Spacer(Modifier.height(40.dp))
         PillButton("GUARDAR", enabled = valid, accent = false) {
-            onSave(Pc(name.trim().ifBlank { "PC" }, formatMac(macBytes!!), host.trim(), portNumber!!, tokenValue!!))
+            onSave(Pc(name.trim().ifBlank { "PC" }, formatMac(macBytes!!), host.trim(), portNumber!!, tokenValue!!, relayValue!!, remoteHost.trim()))
         }
     }
 }

@@ -10,7 +10,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Cifra el token del agente con una clave AES-GCM que vive en el Android Keystore. */
+/** Cifra los secretos (token del agente, clave del relé) con una clave AES-GCM que vive en el Android Keystore. */
 object Secrets {
     private const val ALIAS = "wol_token"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
