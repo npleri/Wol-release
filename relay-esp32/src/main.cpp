@@ -15,6 +15,9 @@
 #include "certs.h"
 #include "secrets.h"
 
+// La app solo acepta claves de 32 caracteres hex: si secrets.h quedo mal editado, que no compile.
+static_assert(sizeof(RELAY_KEY) == 33, "RELAY_KEY en secrets.h debe tener exactamente 32 caracteres hex");
+
 static const char* NTFY_HOST = "ntfy.sh";
 static const long MAX_SKEW_S = 90;                  // antigüedad máxima de una orden
 static const unsigned long STALL_MS = 120000;       // ntfy manda un keepalive cada ~45 s
